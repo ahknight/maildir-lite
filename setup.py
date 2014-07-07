@@ -1,7 +1,7 @@
-from setuptools import setup #, find_packages
+from setuptools import setup, find_packages
 
 setup(
-    name="maildir_lite",
+    name="maildir",
     version="1.0.0",
     description="A Maildir implementation optimized for speed and safety.",
     long_description="",
