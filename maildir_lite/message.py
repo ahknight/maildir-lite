@@ -11,14 +11,14 @@ log = logging.getLogger(__name__)
 delivery_number = 0
 
 class Message(object):
+    _content = None
+    _content_hash = None
+    _date = None
     subdir = "new"
     msgid = None
     info = None
-    _content = None
-    _content_hash = None
     mtime = 0
     last_stat = None
-    _date = None
     
     def __init__(self, content=None, content_hash=None, subdir="new", msgid=None, info=None, mtime=0):
         if content:

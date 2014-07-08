@@ -1,20 +1,28 @@
-import os, logging
+import datetime
+import logging
+import os
+import time
 from .message import Message
-
-
-log = logging.getLogger(__name__)
 
 try:
     import xattr
-    has_xattr = True
-    log.debug("XATTR support enabled")
 except:
-    has_xattr = False
-    log.debug("XATTR support unavailable: pyxattr not found")
+    pass
 
 
 XATTR_SHASUM = b"user.shasum"
 XATTR_DATE = b"user.date"
+
+
+log = logging.getLogger(__name__)
+
+pkgs = dir()
+if 'xattr' in pkgs:
+    has_xattr = True
+    log.debug("XATTR support enabled")
+else:
+    has_xattr = False
+    log.debug("XATTR support unavailable: pyxattr not found")
 
 
 class InvalidMaildirError(Exception):
