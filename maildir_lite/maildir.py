@@ -37,7 +37,7 @@ class NoSuchMailboxError(InvalidMaildirError):
 class Maildir(object):
     path = None
     paths = []
-    _supports_xattr = has_xattr
+    _supports_xattr = False
     
     # Turn on lazy updates if you do not expect this maildir to be
     # externally-modified while open (even by other Maildir instances!).
@@ -49,7 +49,7 @@ class Maildir(object):
     
     folder_seperator = "."
     
-    def __init__(self, path, create=False, lazy=False):
+    def __init__(self, path, create=False, lazy=False, xattr=False):
         self.path = os.path.abspath(os.path.expanduser(path))
         self.lazy = lazy
         self.paths = {
@@ -75,6 +75,12 @@ class Maildir(object):
         if create:
             for subdir in self.paths.values():
                 os.makedirs(subdir, mode=0o700, exist_ok=True)
+        
+        # Turn on XATTRs, if we can/should.
+        if xattr is True:
+            _supports_xattr = has_xattr
+        else:
+            _supports_xattr = False
         
     def __getitem__(self, key):
         return self.get_message(key)
@@ -149,14 +155,9 @@ class Maildir(object):
         filename = os.path.basename(src_path)
         dst_path = os.path.join(maildir.path, "new")
         dst_path = os.path.join(dst_path, filename)
+
         os.rename(src_path, dst_path)
-        
         del self._keys[key]
-        
-        if self.lazy:
-            self._last_update = time.time()
-        else:
-            self._last_update = 0
         
     def _path_for_message(self, message):
         filename = message.msgid
@@ -187,7 +188,6 @@ class Maildir(object):
                 info = parts[1]
             
             msg = Message(content=content, msgid=msgid, info=info, subdir=subdir, mtime=mtime)
-            msg.last_stat = os.stat(path)
             if self._supports_xattr and load_content:
                 try:
                     xattrs = xattr.listxattr(path)
@@ -225,6 +225,7 @@ class Maildir(object):
         except OSError:
             raise KeyError
     
+    
     def _write_message(self, msg):
         msg_path = self._path_for_message(msg)
         
@@ -242,9 +243,8 @@ class Maildir(object):
         
         times = (msg.mtime, msg.mtime)
         os.utime(msg_path, times)
-        
-        msg.last_stat = os.stat(msg_path)
-        
+    
+            
     def get_message(self, key, load_content=True):
         msg_path = self._path_for_key(key)
         msg = self._message_at_path(msg_path, load_content=load_content)
@@ -257,14 +257,13 @@ class Maildir(object):
         
     @property
     def is_subfolder(self):
+        # Handles both Maildir++ and Dovecot FS-style folders.
         if os.path.isdir( os.path.join( os.path.dirname(self.path), "cur" ) ):
             return True
         return False
-        #return (os.path.basename(self.path)[0] == ".")
         
     @property
     def name(self):
-        # name = os.path.basename(self.path)
         if self.is_subfolder:
             name = os.path.basename(self.path)
         else:
@@ -277,14 +276,16 @@ class Maildir(object):
         return self._keys.keys()
     
     def add_message(self, msg):
-        return self.add(content=msg.content, msgid=msg.msgid, info=msg.info, mtime=msg.mtime, subdir=msg.subdir, content_hash=msg.content_hash)
+        return self.add(content=msg.content, msgid=msg.msgid, info=msg.info, mtime=msg.mtime, subdir=msg.subdir)#, content_hash=msg.content_hash)
     
     def add(self, content, msgid=None, subdir=None, info=None, mtime=None, content_hash=None):
         if not mtime:
             mtime = time.time()
         
         msg = Message(content=content, msgid=msgid, info=info, subdir="tmp", mtime=mtime)
-        msg._content_hash = content_hash
+        
+        if self._supports_xattr is True:
+            msg._content_hash = content_hash
         
         # Ensure we have a unique ID, as much as possible.
         while msg.msgid in self.keys():
@@ -292,14 +293,7 @@ class Maildir(object):
         
         # Write to tmp and update metadata
         self._write_message(msg)
-        
         self._keys[msg.msgid] = self._path_for_message(msg)
-        if self.lazy:
-            self._last_update = time.time()
-        else:
-            self._last_update = 0
-        
-        msg.last_stat = os.stat(self._keys[msg.msgid])
         
         # Now that it's written out, move it to the proper destination.
         if subdir:
@@ -313,6 +307,7 @@ class Maildir(object):
     
     def update(self, key, msg):
         old_path = self._path_for_key(key)
+        old_stat = os.stat(old_path)
         
         # See if we have to rename it
         new_path = self._path_for_message(msg)
@@ -326,7 +321,6 @@ class Maildir(object):
                 self._last_update = 0
         
         # Verify the content
-        old_stat = msg.last_stat
         new_stat = os.stat(new_path)
         if not (old_stat and old_stat == new_stat):
             log.debug("Checking message content (%r, %r)", old_stat, new_stat)
@@ -345,10 +339,10 @@ class Maildir(object):
         os.remove(self._path_for_key(key))
         del self._keys[key]
         
-        if self.lazy:
-            self._last_update = time.time()
-        else:
-            self._last_update = 0
+        # if self.lazy:
+        #     self._last_update = time.time()
+        # else:
+        #     self._last_update = 0
     
     def _path_to_folder(self, path):
         base, name = os.path.split(path)
@@ -356,36 +350,17 @@ class Maildir(object):
         return name
     
     def _folder_to_path(self, name):
-        # print("In:", name)
         name = name.replace("/", self.folder_seperator)
         name = name.replace(":", self.folder_seperator)
         
         mailbox_path = self.path
-        if self.is_subfolder: mailbox_path = os.path.dirname(mailbox_path)
+        if self.is_subfolder:
+            mailbox_path = os.path.dirname(mailbox_path)
         
         if name[0] != ".": name = "." + name
             
         path = os.path.join(mailbox_path, name)
         
-        # print("Out:", path)
-        return path
-        
-    def _folder_to_path_old(self, name):
-        name = name.replace("/", self.folder_seperator)
-        name = name.replace(":", self.folder_seperator)
-        
-        if self.is_subfolder:
-            if name[0] != self.folder_seperator: name = self.folder_seperator + name
-            parent_path = os.path.dirname(self.path)
-            parent_name = os.path.basename(self.path)
-            if not name.startswith(parent_name):
-                name = parent_name + name
-                
-            path = os.path.join(parent_path, name)
-        else:
-            if name[0] != ".": name = "." + name
-            path = os.path.join(self.path, name)
-            
         return path
         
     def list_folders(self):
@@ -404,8 +379,6 @@ class Maildir(object):
             # doing it this way handles Dovecot FS-style Maildirs.
             if path.startswith(folder_root) and os.path.isdir(path) and os.path.isdir( os.path.join(path,"cur") ):
                 folders.append(self._path_to_folder(path))
-        
-        # folders.append(self._path_to_folder(self.path))
         
         return folders
     
