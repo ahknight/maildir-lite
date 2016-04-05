@@ -38,6 +38,7 @@ class Maildir(object):
     path = None
     paths = []
     _supports_xattr = False
+    fs_layout = False
     
     # Turn on lazy updates if you do not expect this maildir to be
     # externally-modified while open (even by other Maildir instances!).
@@ -49,9 +50,12 @@ class Maildir(object):
     
     folder_seperator = "."
     
-    def __init__(self, path, create=False, lazy=False, xattr=False):
+    def __init__(self, path, create=False, lazy=False, xattr=False, fs_layout=False):
         self.path = os.path.abspath(os.path.expanduser(path))
         self.lazy = lazy
+        self.fs_layout = fs_layout
+        if fs_layout == True:
+            self.folder_seperator = "/"
         self.paths = {
             "cur": os.path.join(self.path, "cur"),
             "new": os.path.join(self.path, "new"),
@@ -64,8 +68,10 @@ class Maildir(object):
             if not os.path.isdir(self.path):
                 raise InvalidMaildirError(self.path)
             # And is it a maildir?
-            if not os.path.isdir( os.path.join(path,"cur") ):
-                raise InvalidMaildirError(self.path)
+            if not os.path.isdir( os.path.join(path, "cur") ):
+                # Okay, can we fix it later?
+                if not create:
+                    raise InvalidMaildirError(self.path)
         
         # It doesn't exist, so can we create it?
         elif create is False:
@@ -353,25 +359,30 @@ class Maildir(object):
         name = name.replace("/", self.folder_seperator)
         name = name.replace(":", self.folder_seperator)
         
+        if self.fs_layout == True and name[0] == '/':
+            name = name[1:]
+        
         mailbox_path = self.path
         if self.is_subfolder:
             mailbox_path = os.path.dirname(mailbox_path)
         
-        if name[0] != ".": name = "." + name
-            
+        if self.fs_layout is False and name[0] != ".":
+            name = "." + name
+        
         path = os.path.join(mailbox_path, name)
         
         return path
         
     def list_folders(self):
         folders = [self.name]
+        folder_root = self.path
         
         if self.is_subfolder:
             maildir_path = os.path.dirname(self.path)
-            folder_root = self.path + "."
+            if self.fs_layout is False:
+                folder_root = self.path + "."
         else:
             maildir_path = self.path
-            folder_root = self.path
         
         for dirent in os.listdir(maildir_path):
             path = os.path.join(maildir_path, dirent)
@@ -387,7 +398,7 @@ class Maildir(object):
         
         path = self._folder_to_path(name)
         try:
-            m = Maildir(path, create=False, lazy=self.lazy)
+            m = Maildir(path, create=False, lazy=self.lazy, fs_layout=self.fs_layout)
             m.lazy_period = self.lazy_period
             return m
         except:
@@ -400,6 +411,6 @@ class Maildir(object):
             
         except NoSuchMailboxError:
             path = self._folder_to_path(name)
-            folder = Maildir(path, create=True, lazy=self.lazy)
+            folder = Maildir(path, create=True, lazy=self.lazy, fs_layout=self.fs_layout)
             folder.lazy_period = self.lazy_period
             return folder

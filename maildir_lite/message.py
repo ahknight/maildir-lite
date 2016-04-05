@@ -75,7 +75,7 @@ class Message(object):
         process_number = os.getpgid(0)
         delivery_number += 1
         
-        msgid_str = "%d.R%dM%dP%dQ%d.%s,S=%d" % (seconds_number, random_number, microsecond_number, process_number, delivery_number, hostname_string, len(self.content))
+        msgid_str = "%d.R%dM%dP%dQ%d.%s,MD5=%s,S=%d" % (seconds_number, random_number, microsecond_number, process_number, delivery_number, hostname_string, self.content_hash, len(self.content))
         
         return msgid_str
     
@@ -92,7 +92,8 @@ class Message(object):
     @property
     def content_hash(self):
         if not self._content_hash and self._content:
-            self._content_hash = hashlib.sha256(self._content).hexdigest().encode("utf8")
+            # self._content_hash = hashlib.sha256(self._content).hexdigest().encode("utf8")
+            self._content_hash = hashlib.md5(self._content).hexdigest().encode("utf8")
         return self._content_hash
     
     @property
