@@ -13,10 +13,12 @@ delivery_number = 0
 
 class Message(object):
     _content = None
-    _content_hash = None
     _date = None
     subdir = "new"
-    msgid = None
+    msg_id = None
+    msg_md5 = None
+    msg_size = 0
+    msg_vsize = 0
     info = None
     mtime = 0
     
@@ -25,9 +27,6 @@ class Message(object):
             self.content = content
         else:
             self.content = b""
-        
-        if content_hash:
-            self._content_hash = content_hash
             
         if subdir:
             self.subdir = subdir
@@ -36,21 +35,24 @@ class Message(object):
             self.msgid = msgid
         else:
             self.msgid = self._gen_msgid()
-            
+        
+        if content_hash:
+            self.msg_md5 = content_hash
+        
+        if not self.msg_size:
+            self.msg_size = len(self._content)
+        
         if info:
             self.info = info
             
         if mtime:
             self.mtime = mtime
     
-    
     def __repr__(self):
         return "Message(msgid='%s', subdir='%s', info='%s', mtime='%s', content='%s')" % (self.msgid, self.subdir, self.info, self.mtime, self.content)
     
-    
     def __bytes__(self):
         return self.content
-    
     
     def __str__(self):
         '''
@@ -59,10 +61,8 @@ class Message(object):
         '''
         return bytes(self).decode("utf8", errors="ignore")
     
-    
     def __format__(self, formatspec):
         return str(self).__format__(formatspec)
-    
     
     def _gen_msgid(self):
         global delivery_number
@@ -75,9 +75,44 @@ class Message(object):
         process_number = os.getpgid(0)
         delivery_number += 1
         
-        msgid_str = "%d.R%dM%dP%dQ%d.%s,MD5=%s,S=%d" % (seconds_number, random_number, microsecond_number, process_number, delivery_number, hostname_string, self.content_hash, len(self.content))
-        
+        msgid_str = "%d.R%dM%dP%dQ%d.%s" % (seconds_number, random_number, microsecond_number, process_number, delivery_number, hostname_string)
         return msgid_str
+    
+    @property
+    def msgid(self):
+        props = {}
+        if self.msg_md5:
+            props["MD5"] = self.msg_md5
+        else:
+            self.msg_md5 = self.content_hash
+            props["MD5"] = self.msg_md5
+        
+        if self.msg_size:
+            props["S"] = self.msg_size
+        
+        if self.msg_vsize:
+            props["W"] = self.msg_vsize
+        
+        msgid = self.msg_id
+        for k in sorted(list(props.keys())):
+            msgid += ",%s=%s" % (k, props[k])
+        return msgid
+    
+    @msgid.setter
+    def msgid(self, msgid):
+        props = msgid.split(",")
+        self.msg_id = props.pop(0)
+        for prop in props:
+            try:
+                k,v = prop.split("=")
+                if k == "MD5":
+                    self.msg_md5 = v
+                elif k == "S":
+                    self.msg_size = v
+                elif k == "W":
+                    self.msg_vsize = v
+            except:
+            	continue
     
     @property
     def content(self):
@@ -86,15 +121,16 @@ class Message(object):
     @content.setter
     def content(self, newcontent):
         self._content = bytes(newcontent)
-        self._content_hash = None
+        self.msg_md5 = None
+        self.msg_size = 0
+        self.msg_vsize = 0
         self._headers = None
         
     @property
     def content_hash(self):
-        if not self._content_hash and self._content:
-            # self._content_hash = hashlib.sha256(self._content).hexdigest().encode("utf8")
-            self._content_hash = hashlib.md5(self._content).hexdigest().encode("utf8")
-        return self._content_hash
+        if not self.msg_md5 and self._content:
+            self.msg_md5 = hashlib.md5(self._content).hexdigest()
+        return self.msg_md5
     
     @property
     def headers(self):
